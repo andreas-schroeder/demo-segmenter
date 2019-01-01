@@ -34,11 +34,13 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
   val settings: Map[String, String] = Map(
     APPLICATION_ID_CONFIG                                  -> "segmenter",
     BOOTSTRAP_SERVERS_CONFIG                               -> config.kafka.bootstrapServers,
+    PROCESSING_GUARANTEE_CONFIG                            -> EXACTLY_ONCE,
     COMMIT_INTERVAL_MS_CONFIG                              -> 500.toString,
-    SCHEMA_REGISTRY_URL_CONFIG                             -> config.kafka.schemaRegistry,
+    NUM_STANDBY_REPLICAS_CONFIG                            -> "1",
     DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG -> classOf[LogAndContinueExceptionHandler].getName,
     DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG               -> classOf[SegmenterTimestampExtractor].getName,
-    NUM_STANDBY_REPLICAS_CONFIG                            -> "1"
+    METRICS_SAMPLE_WINDOW_MS_CONFIG                        -> "1000",
+    METRICS_NUM_SAMPLES_CONFIG                             -> "5",
   )
 
   import serdes._
