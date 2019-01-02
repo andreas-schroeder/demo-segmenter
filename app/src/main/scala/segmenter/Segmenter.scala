@@ -2,7 +2,6 @@ package segmenter
 
 import common._
 import events._
-import io.confluent.kafka.serializers.AbstractKafkaAvroSerDeConfig._
 import org.apache.kafka.common.Metric
 import org.apache.kafka.streams.KafkaStreams
 import org.apache.kafka.streams.StreamsConfig._
