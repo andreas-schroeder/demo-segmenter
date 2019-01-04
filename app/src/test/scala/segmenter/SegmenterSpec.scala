@@ -8,6 +8,7 @@ import common.{AppConfig, Demo, KafkaConfig}
 import events._
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.serialization.Serde
+import org.apache.kafka.streams.state.KeyValueStore
 import org.apache.kafka.streams.test.ConsumerRecordFactory
 import org.apache.kafka.streams.{StreamsConfig, TopologyTestDriver}
 import org.scalatest.{BeforeAndAfter, MustMatchers, WordSpec}
@@ -29,12 +30,14 @@ class SegmenterSpec extends WordSpec with MustMatchers with BeforeAndAfter { tes
 
   "segmenter" should {
     "forward device events" in {
-      sendEvent(Device("device-1"), wokeUp)
+      val device = Device("device-1")
+      sendEvent(device, wokeUp)
 
       val eventRecord = readEvent
+      val session     = store.get(device)
 
-      eventRecord.key.device.id mustBe "device-1"
-      eventRecord.key.sessionId mustNot be(empty)
+      eventRecord.key.device.id mustBe device.id
+      eventRecord.key.sessionId mustBe session.sessionId
       eventRecord.value.event mustBe wokeUp
     }
 
@@ -68,18 +71,26 @@ class SegmenterSpec extends WordSpec with MustMatchers with BeforeAndAfter { tes
       dataRecord.key mustBe start2Record.key
     }
 
-    "purge sessions after session is closed" in {
-      val store = testDriver.getKeyValueStore[Device, Session]("sessions")
+    "forward session closing" in {
+      val device = Device("device-1")
+      sendEvent(device, wokeUp)
+      sendEvent(device, allDataReceived)
 
+      val startRecord = readEvent
+      val endRecord   = readEvent
+
+      startRecord.key mustBe endRecord.key
+    }
+
+    "purge sessions after timeout" in {
       val device1 = Device("device-2")
       val device2 = Device("device-1")
 
       sendEvent(device1, wokeUp)
-      sendEvent(device1, allDataReceived)
 
       Option(store.get(device1)) mustBe defined
 
-      sendEvent(device2, wokeUp, Instant.now.plusSeconds(5)) // advance stream time to trigger purger
+      sendEvent(device2, wokeUp, Instant.now.plusSeconds(5)) // advance stream time to trigger purge
 
       Option(store.get(device1)) mustBe None
     }
@@ -92,6 +103,8 @@ class SegmenterSpec extends WordSpec with MustMatchers with BeforeAndAfter { tes
 
   def readEvent: ProducerRecord[SessionKey, Envelope] =
     testDriver.readOutput("session-events", sessionKeySerde.deserializer, envelopeSerde.deserializer)
+
+  def store: KeyValueStore[Device, Session] = testDriver.getKeyValueStore[Device, Session]("sessions")
 
   before {
     val config = AppConfig(KafkaConfig("not-used:1234", "not-used:1234"), Demo)

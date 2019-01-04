@@ -28,14 +28,12 @@ class SessionPurger extends Processor[Device, Session] with Punctuator {
     purging = context.schedule(Duration.ofSeconds(4), PunctuationType.STREAM_TIME, this)
   }
 
-  override def process(key: Device, value: Session): Unit = ()
+  override def process(key: Device, value: Session): Unit = if (value != null && value.completed) sessions.delete(key)
 
   override def close(): Unit = purging.cancel()
 
   override def punctuate(timestamp: Long): Unit = sessions.all().forEachRemaining { kv =>
     val sessionAge = timestamp - kv.value.timestamp.toEpochMilli
-    if (kv.value.completed || sessionAge >= timeout) {
-      sessions.delete(kv.key)
-    }
+    if (sessionAge >= timeout) sessions.delete(kv.key)
   }
 }

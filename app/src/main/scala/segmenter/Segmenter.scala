@@ -5,6 +5,8 @@ import events._
 import org.apache.kafka.common.Metric
 import org.apache.kafka.streams.KafkaStreams
 import org.apache.kafka.streams.StreamsConfig._
+import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.streams.errors.LogAndContinueExceptionHandler
 import org.apache.kafka.streams.scala.ImplicitConversions._
 import org.apache.kafka.streams.scala.kstream.{KStream, KTable, Materialized}
@@ -31,15 +33,18 @@ object Segmenter {
 class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
 
   val settings: Map[String, String] = Map(
-    APPLICATION_ID_CONFIG                                  -> "segmenter",
-    BOOTSTRAP_SERVERS_CONFIG                               -> config.kafka.bootstrapServers,
-    PROCESSING_GUARANTEE_CONFIG                            -> EXACTLY_ONCE,
-    COMMIT_INTERVAL_MS_CONFIG                              -> 500.toString,
-    NUM_STANDBY_REPLICAS_CONFIG                            -> "1",
-    DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG -> classOf[LogAndContinueExceptionHandler].getName,
-    DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG               -> classOf[SegmenterTimestampExtractor].getName,
-    METRICS_SAMPLE_WINDOW_MS_CONFIG                        -> "1000",
-    METRICS_NUM_SAMPLES_CONFIG                             -> "5",
+    APPLICATION_ID_CONFIG                                       -> "segmenter",
+    BOOTSTRAP_SERVERS_CONFIG                                    -> config.kafka.bootstrapServers,
+    producerPrefix(ProducerConfig.ACKS_CONFIG)                  -> "all",
+    PROCESSING_GUARANTEE_CONFIG                                 -> EXACTLY_ONCE,
+    COMMIT_INTERVAL_MS_CONFIG                                   -> 500.toString,
+    NUM_STANDBY_REPLICAS_CONFIG                                 -> "1",
+    DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG      -> classOf[LogAndContinueExceptionHandler].getName,
+    DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG                    -> classOf[SegmenterTimestampExtractor].getName,
+    consumerPrefix(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG)    -> "6000",
+    consumerPrefix(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG) -> "2000",
+    METRICS_SAMPLE_WINDOW_MS_CONFIG                             -> "1000",
+    METRICS_NUM_SAMPLES_CONFIG                                  -> "5"
   )
 
   import serdes._
@@ -49,23 +54,29 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
 
   val builder = new StreamsBuilder
 
+  def start(): Unit = {
+    val streams = new KafkaStreams(builder.build(), settings.asProps)
+    streams.start()
+    printMetrics(streams)
+  }
+
   val events: KStream[Device, Envelope] = builder.stream[Device, Envelope]("events")
 
   private def rndSessionId(): String = Random.alphanumeric.take(8).mkString
 
   // upsert sessions by aggregating events by device.
-  val sessions: KTable[Device, Session] = events.groupByKey.aggregate[Session](null) { (key, value, last) =>
-    def newSession(completed: Boolean = false) = Session(key, rndSessionId(), value.timestamp, completed)
+  val sessions: KTable[Device, Session] = events.groupByKey.aggregate[Session](null) { (key, evt, last) =>
+    def newSession(completed: Boolean = false) = Session(key, rndSessionId(), evt.timestamp, completed)
 
-    value.event match {
+    evt.event match {
       case DeviceWokeUp() => newSession()
 
       case AllDataReceived() =>
-        if (last != null) last.copy(completed = true, timestamp = value.timestamp)
+        if (last != null) last.copy(completed = true, timestamp = evt.timestamp)
         else newSession(completed = true)
 
       case _ =>
-        if (last != null && !last.completed) last.copy(timestamp = value.timestamp)
+        if (last != null && !last.completed) last.copy(timestamp = evt.timestamp)
         else newSession() // create a new session if no session exists or the previous one was completed
     }
   }
@@ -80,12 +91,6 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
     .join(sessions)((evt, session) => (evt, session)) // session lookup.
     .map { case (key, (evt, session)) => SessionKey(key, session.sessionId) -> evt }
     .to("session-events")
-
-  def start(): Unit = {
-    val streams = new KafkaStreams(builder.build(), settings.asProps)
-    streams.start()
-    printMetrics(streams)
-  }
 
   private def printMetrics(streams: KafkaStreams): Unit = {
     def value(metric: Metric): Double = metric.metricValue.asInstanceOf[Double]
