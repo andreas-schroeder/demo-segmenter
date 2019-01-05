@@ -47,11 +47,6 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
     METRICS_NUM_SAMPLES_CONFIG                                  -> "5"
   )
 
-  import serdes._
-
-  implicit val sessionMaterialized: Materialized[Device, Session, ByteArrayKeyValueStore] =
-    Materialized.as(Stores.inMemoryKeyValueStore("sessions"))
-
   val builder = new StreamsBuilder
 
   def start(): Unit = {
@@ -59,6 +54,11 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
     streams.start()
     printMetrics(streams)
   }
+
+  import serdes._
+
+  implicit val sessionMaterialized: Materialized[Device, Session, ByteArrayKeyValueStore] =
+    Materialized.as(Stores.inMemoryKeyValueStore("sessions"))
 
   val events: KStream[Device, Envelope] = builder.stream[Device, Envelope]("events")
 
