@@ -37,7 +37,7 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
     BOOTSTRAP_SERVERS_CONFIG                                    -> config.kafka.bootstrapServers,
     producerPrefix(ProducerConfig.ACKS_CONFIG)                  -> "all",
     PROCESSING_GUARANTEE_CONFIG                                 -> EXACTLY_ONCE,
-    COMMIT_INTERVAL_MS_CONFIG                                   -> 500.toString,
+    COMMIT_INTERVAL_MS_CONFIG                                   -> "500",
     NUM_STANDBY_REPLICAS_CONFIG                                 -> "1",
     DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG      -> classOf[LogAndContinueExceptionHandler].getName,
     DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG                    -> classOf[SegmenterTimestampExtractor].getName,
@@ -65,25 +65,23 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
   private def rndSessionId(): String = Random.alphanumeric.take(8).mkString
 
   // upsert sessions by aggregating events by device.
-  val sessions: KTable[Device, Session] = events.groupByKey.aggregate[Session](null) { (key, evt, last) =>
+  val sessions: KTable[Device, Session] = events.groupByKey.aggregate[Session](null) { (key, evt, current) =>
     def newSession(completed: Boolean = false) = Session(key, rndSessionId(), evt.timestamp, completed)
 
     evt.event match {
       case DeviceWokeUp() => newSession()
 
       case AllDataReceived() =>
-        if (last != null) last.copy(completed = true, timestamp = evt.timestamp)
+        if (current != null) current.copy(completed = true, timestamp = evt.timestamp)
         else newSession(completed = true)
 
       case _ =>
-        if (last != null && !last.completed) last.copy(timestamp = evt.timestamp)
+        if (current != null && !current.completed) current.copy(timestamp = evt.timestamp)
         else newSession() // create a new session if no session exists or the previous one was completed
     }
   }
 
   // eventually purge sessions (completed ones immediately, others via timeout)
-  // the purger does not really process the output from sessions - it uses the sessions stream as
-  // clock / time provider to trigger and control purging.
   sessions.toStream.process(() => new SessionPurger(), "sessions")
 
   // replace the event key with a session key based on the current session.
