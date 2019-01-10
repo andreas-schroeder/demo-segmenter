@@ -27,13 +27,15 @@ class Driver(config: AppConfig) {
     Map(
       CLIENT_ID_CONFIG                      -> "driver",
       BOOTSTRAP_SERVERS_CONFIG              -> config.kafka.bootstrapServers,
+      ENABLE_IDEMPOTENCE_CONFIG             -> "true",
       RETRIES_CONFIG                        -> Int.MaxValue.toString,
-      MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION -> "1",
-      ACKS_CONFIG                           -> "all"
+      MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION -> "5",
+      ACKS_CONFIG                           -> "all",
+      COMPRESSION_TYPE_CONFIG               -> "lz4"
     )
   }
 
-  val keys: Seq[Device]    = (1 to 5).map(i => Device(s"device-$i"))
+  val keys: Seq[Device]    = (1 to 10).map(i => Device(s"device-$i"))
   val metrics: Seq[String] = Seq("pressure", "temperature", "wind", "humidity")
 
   val registry: String = config.kafka.schemaRegistry

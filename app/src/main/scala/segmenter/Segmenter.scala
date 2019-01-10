@@ -39,6 +39,7 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
     PROCESSING_GUARANTEE_CONFIG                                 -> EXACTLY_ONCE,
     COMMIT_INTERVAL_MS_CONFIG                                   -> "500",
     NUM_STANDBY_REPLICAS_CONFIG                                 -> "1",
+    producerPrefix(ProducerConfig.COMPRESSION_TYPE_CONFIG)      -> "lz4",
     DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG      -> classOf[LogAndContinueExceptionHandler].getName,
     DEFAULT_TIMESTAMP_EXTRACTOR_CLASS_CONFIG                    -> classOf[SegmenterTimestampExtractor].getName,
     consumerPrefix(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG)    -> "6000",
@@ -86,8 +87,8 @@ class Segmenter(config: AppConfig, serdes: SegmenterSerdes) {
 
   // replace the event key with a session key based on the current session.
   events
-    .join(sessions)((evt, session) => (evt, session)) // session lookup.
-    .map { case (key, (evt, session)) => SessionKey(key, session.sessionId) -> evt }
+    .join(sessions)((evt, session) => (evt, session.sessionId)) // session lookup.
+    .map { case (key, (evt, sessionId)) => SessionKey(key, sessionId) -> evt }
     .to("session-events")
 
   private def printMetrics(streams: KafkaStreams): Unit = {
